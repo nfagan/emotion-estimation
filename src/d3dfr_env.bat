@@ -1,0 +1,1 @@
+set PYTHONPATH=%PYTHONPATH%;C:\Users\nick\source\changlab\ilker_collab\Deep3DFaceRecon_pytorch;C:\Users\nick\source\changlab\ilker_collab\mtcnn

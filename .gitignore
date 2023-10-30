@@ -1,0 +1,7 @@
+__pycache__/
+src/checkpoints/
+src/output/
+.vscode/
+*.asv
+*.m~
+

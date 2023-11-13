@@ -11,8 +11,8 @@ for i = 1:numel(fs)
   full_dst_p = fullfile( dst_p, strrep(fs{i}, fullfile(data_root, 'activations'), '') );
   full_dst_p = strrep( full_dst_p, '.h5', '.mat' );
   
-  if ( 0 )
-    fprintf( '\n Would save: %s', full_dst_p );
+  if ( exist(full_dst_p, 'file') )
+    fprintf( '\n Skipping: %s', full_dst_p );
     continue
   end
   

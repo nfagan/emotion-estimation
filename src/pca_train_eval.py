@@ -11,11 +11,19 @@ data_root = utility.get_dataroot()
 MODE = 'valid'
 SELECT_SPLIT = 'valid'
 SAVE = True
+CUSTOM_NUM_COMPONENTS = 80
+# CUSTOM_NUM_COMPONENTS = None
 
 DATASET = 'd3dfr'
 VARIANT = '_expression_balanced_var_subsample_1000'
 LAYERS = [f'resnet_layer{x+1}' for x in range(4)] + ['resnet_output', 'ReconNetWrapper_output']
 LAYERS = LAYERS[1:]
+LAYERS = ['resnet_layer1']
+
+# DATASET = 'resnet_image_embedding'
+# VARIANT = '_expression_balanced_var_subsample_1000'
+# LAYERS = [f'layer{x+2}' for x in range(3)]
+# LAYERS = ['layer1']
 
 def make_model_from_hp(hp, nc=None):
   return PCA(n_components=nc)
@@ -65,7 +73,8 @@ if __name__ == '__main__':
     
     layer = LAYERS[li]
     acts = f'{DATASET}/{MODE}{VARIANT}/{layer}'
-    cp_dir = 'pca_checkpoints' if MODE == 'train' else 'pca_eval'
+    pca_p = f'pca_nc_{CUSTOM_NUM_COMPONENTS}' if CUSTOM_NUM_COMPONENTS is not None else 'pca'
+    cp_dir = f'{pca_p}_checkpoints' if MODE == 'train' else f'{pca_p}_eval'
     dst_p = os.path.join(data_root, cp_dir, acts)
 
     act, split, _, _ = utility.load_activations(os.path.join(data_root, 'activations', f'{acts}.h5'))
@@ -79,7 +88,10 @@ if __name__ == '__main__':
       # determine number of components
       ve = np.cumsum(model.explained_variance_)
       ve = ve / ve[-1]
-      nc = 1 + np.argwhere(ve > hp['var_explained_thresh'])[0][0]
+      if CUSTOM_NUM_COMPONENTS is None:
+        nc = 1 + np.argwhere(ve > hp['var_explained_thresh'])[0][0]
+      else:
+        nc = CUSTOM_NUM_COMPONENTS
       hp['num_components'] = nc
 
       err = recon_err(model, act, nc)
@@ -89,7 +101,8 @@ if __name__ == '__main__':
         save_checkpoint(dst_p, model, hp, err, ev, np.mean(err))
     
     else:
-      src_p = os.path.join(data_root, 'pca_checkpoints', acts.replace('valid', 'train'))
+      cp_dir_name = f'{pca_p}_checkpoints'
+      src_p = os.path.join(data_root, cp_dir_name, acts.replace('valid', 'train'))
       model, hp = load_checkpoint(src_p)
       err = recon_err(model, act, hp['num_components'])
       ev = explained_var(model, act, hp['num_components'])

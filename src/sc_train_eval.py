@@ -8,7 +8,7 @@ data_root = utility.get_dataroot()
 
 MODE = 'valid'
 SELECT_SPLIT = 'valid'
-SAVE = True
+SAVE = False
 
 DATASET = 'd3dfr'
 VARIANT = '_var_subsample_2048'
@@ -16,6 +16,13 @@ VARIANT = '_expression_balanced_var_subsample_1000'
 # VARIANT = ''
 LAYERS = [f'resnet_layer{x+1}' for x in range(4)] + ['resnet_output', 'ReconNetWrapper_output']
 LAYERS = LAYERS[1:]
+LAYERS = ['resnet_layer1']
+
+# DATASET = 'resnet_image_embedding'
+# VARIANT = '_expression_balanced_var_subsample_1000'
+# LAYERS = [f'layer{x+2}' for x in range(3)]
+# LAYERS = ['layer1']
+
 RESCALE_MEAN_ACTIVATIONS_TO = 0.5
 
 # DATASET = 'image_net'

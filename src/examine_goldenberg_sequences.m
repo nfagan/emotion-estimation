@@ -37,6 +37,12 @@ true_seq_lens = seq_tbl.face_number;
 
 est_diff = seq_tbl.estimation - true_mean_ratings;
 
+seq_identifiers = [ seq_tbl.sequence, double(char(seq_tbl.faceIdentity)) ];
+seq_identifiers(isnan(seq_identifiers)) = 0;
+[~, ~, seq_ids] = unique( seq_identifiers, 'rows' );
+
+seq_tbl.sequence_id = seq_ids;
+
 %%  match up images
 
 % //randomly choose from negative and face_tive emotion

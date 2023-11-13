@@ -4,4 +4,4 @@ src/output/
 .vscode/
 *.asv
 *.m~
-
+*.h5

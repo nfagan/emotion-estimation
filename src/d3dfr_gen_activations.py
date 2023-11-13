@@ -5,8 +5,9 @@ import os
 from options.test_options import TestOptions
 from data import create_dataset
 from models import create_model
+from models.networks import define_net_recog
 from util.visualizer import MyVisualizer
-from util.preprocess import align_img
+from util.preprocess import align_img, estimate_norm_torch
 from PIL import Image
 import numpy as np
 from util.load_mats import load_lm3d
@@ -16,22 +17,28 @@ from scipy.io import loadmat, savemat
 import h5py
 from utility import h5_write_activations, get_dataroot
 
-
-DST_P = os.path.join(get_dataroot(), 'activations', 'd3dfr', 'train_expression_balanced')
-DST_IM_P = os.path.join(get_dataroot(), 'd3dfr_face_recon', 'results', 'train_expression_balanced')
 SPLIT = 'train'
+DST_P = os.path.join(get_dataroot(), 'activations', 'd3dfr', f'{SPLIT}_expression_balanced')
+# DST_IM_P = os.path.join(get_dataroot(), 'd3dfr_face_recon', 'results', f'{SPLIT}_expression_balanced')
 
 DST_IM_P = os.path.join(get_dataroot(), 'd3dfr_face_recon', 'results', 'images', 'epoch_20_000000')
 
 SAVE_MODEL_OUTPUT = False
-SAVE_PRED_MASK = True
-SAVE_ACTIVATIONS = False
+SAVE_PRED_MASK = False
+SAVE_RECON_ACTIVATIONS = False
+SAVE_RECOG_ACTIVATIONS = True
 # SUBSAMPLE_SIZE = 1000
 SUBSAMPLE_SIZE = None
-CHUNK_SIZE = 1000
+CHUNK_SIZE = 256
+
+FEATURES = {}
+
+def get_features(name):
+    def hook(model, input, output):
+        FEATURES[name] = output.detach()
+    return hook
 
 def get_data_path(root='examples'):
-    
     im_path = [os.path.join(root, i) for i in sorted(os.listdir(root)) if i.endswith('png') or i.endswith('jpg')]
     lm_path = [i.replace('png', 'txt').replace('jpg', 'txt') for i in im_path]
     lm_path = [os.path.join(i.replace(i.split(os.path.sep)[-1],''),'detections',i.split(os.path.sep)[-1]) for i in lm_path]
@@ -65,13 +72,33 @@ def main(rank, opt, name='examples'):
     visualizer = MyVisualizer(opt)
     visualizer.save_dir = DST_IM_P
 
+    """
+    recognet
+    """
+    recog_model = define_net_recog(
+        'r50',
+        pretrained_path=os.path.join(get_dataroot(), 'arcface_torch/ms1mv3_arcface_r50_fp16/backbone.pth'),
+        input_size=112
+    )
+    recog_model.to(device)
+    recog_model.net.layer1.register_forward_hook(get_features('layer1'))
+    # recog_model.net.layer2.register_forward_hook(get_features('layer2'))
+    # recog_model.net.layer3.register_forward_hook(get_features('layer3'))
+    # recog_model.net.layer4.register_forward_hook(get_features('layer4'))
+    """
+    end recognet
+    """
+
     im_path, lm_path = get_data_path(name)
     lm3d_std = load_lm3d(opt.bfm_folder) 
 
-    layer_names = ['resnet_layer1', 'resnet_layer2', 'resnet_layer3', 'resnet_layer4', 'resnet_output', 'ReconNetWrapper_output']
+    layer_names = [
+        'resnet_layer1', 'resnet_layer2',
+        'resnet_layer3', 'resnet_layer4', 'resnet_output', 'ReconNetWrapper_output'
+    ]
     #   @TODO: Re-add resnet_layer1
-    layer_names = layer_names[1:]
-    # layer_names = ['resnet_layer1']
+    # layer_names = layer_names[:1]
+    layer_names = ['resnet_layer1']
 
     num_ims = len(im_path)
     # num_ims = min(10, num_ims)
@@ -79,14 +106,16 @@ def main(rank, opt, name='examples'):
     num_chunks = int(np.ceil(num_ims / chunk_size))
 
     for chunk in range(0, num_chunks):
+        print(f'Chunk {chunk}')
         layer_outputs = {name: [] for name in layer_names}
 
         i0 = chunk * chunk_size
         i1 = min(i0 + chunk_size, num_ims)
 
         im_names = []
+        tot_acts = {}
         for i in range(i0, i1):
-            print(i, im_path[i])
+            print('\t', i, im_path[i])
             img_name = im_path[i].split(os.path.sep)[-1].replace('.png','').replace('.jpg','')
             im_names.append(img_name)
             if not os.path.isfile(lm_path[i]):
@@ -99,6 +128,16 @@ def main(rank, opt, name='examples'):
             }
             model.set_input(data)  # unpack data from data loader
             model.test()           # run inference
+
+            """
+            recog net
+            """
+            trans_m = estimate_norm_torch(model.pred_lm, model.input_img.shape[-2])
+            recog_out = recog_model(model.input_img, trans_m)
+            """
+            end recog net
+            """
+
             visuals = model.get_current_visuals()  # get image results
             visualizer.display_current_results(visuals, 0, opt.epoch, dataset=name.split(os.path.sep)[-1], 
                 save_results=SAVE_MODEL_OUTPUT, count=i, name=img_name, add_image=False)
@@ -112,13 +151,32 @@ def main(rank, opt, name='examples'):
                 model.save_mesh(os.path.join(save_dir, name.split(os.path.sep)[-1], 'epoch_%s_%06d'%(opt.epoch, 0),img_name+'.obj')) # save reconstruction meshes
                 model.save_coeff(os.path.join(save_dir, name.split(os.path.sep)[-1], 'epoch_%s_%06d'%(opt.epoch, 0),img_name+'.mat')) # save predicted coefficients
 
-            for name in layer_names:
-                v = model.acts[name].cpu().flatten(1).numpy()
-                if SUBSAMPLE_SIZE is not None:
-                    v = v[:, :SUBSAMPLE_SIZE]
-                layer_outputs[name].append(v)
+            if SAVE_RECON_ACTIVATIONS:
+                for name in layer_names:
+                    v = model.acts[name].cpu().flatten(1).numpy()
+                    if SUBSAMPLE_SIZE is not None:
+                        v = v[:, :SUBSAMPLE_SIZE]
+                    layer_outputs[name].append(v)
 
-        if SAVE_ACTIVATIONS:
+            """
+            recog net
+            """
+            for layer_name in FEATURES.keys():
+                feat = FEATURES[layer_name].detach().cpu().numpy().flatten()
+                if i == i0: tot_acts[layer_name] = np.zeros((i1 - i0, feat.size), dtype=np.float32)
+                acts = tot_acts[layer_name]
+                acts[i - i0, :] = feat
+            """
+            end recog net
+            """
+        if SAVE_RECOG_ACTIVATIONS:
+            chunk_p = os.path.join(DST_P.replace('d3dfr', 'arcface_recog'), f'chunk_{chunk}')
+            os.makedirs(chunk_p, exist_ok=True)
+            for layer_name in FEATURES.keys():
+                with h5py.File(os.path.join(chunk_p, f'{layer_name}.h5'), 'w') as f:
+                    h5_write_activations(f, tot_acts[layer_name], SPLIT, layer_name, im_names)
+
+        if SAVE_RECON_ACTIVATIONS:
             chunk_p = os.path.join(DST_P, f'chunk_{chunk}')
             os.makedirs(chunk_p, exist_ok=True)
             acts = [np.concatenate(layer_outputs[x]) for x in layer_names]

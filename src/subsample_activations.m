@@ -1,11 +1,19 @@
 data_root = 'D:\data\changlab\ilker_collab';
 
-fs = shared_utils.io.find( fullfile(data_root, 'activations/d3dfr', ["train", "valid"]), '.h5' );
+% fs = shared_utils.io.find( fullfile(data_root, 'activations/d3dfr', ["train", "valid"]), '.h5' );
+% 
+% fs = shared_utils.io.find( fullfile(data_root, 'activations/d3dfr', ["train_expression_balanced"]), '.h5' );
+% src_p = fullfile( data_root, 'activations/d3dfr/train_var_subsample' );
 
-fs = shared_utils.io.find( fullfile(data_root, 'activations/d3dfr', ["train_expression_balanced"]), '.h5' );
-src_p = fullfile( data_root, 'activations/d3dfr/train_var_subsample' );
+fs = shared_utils.io.find( fullfile(data_root, 'activations/arcface_recog' ...
+  , ["train_expression_balanced", "valid_expression_balanced"]), '.h5' );
+src_p = [];
 
-allow_overwrite = true;
+if ( 1 )
+  fs = fs(contains(fs, 'layer1'));
+end
+
+allow_overwrite = false;
 targ_dim = 1000;
 order_by_var = true;
 

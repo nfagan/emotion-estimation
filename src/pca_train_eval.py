@@ -19,6 +19,7 @@ VARIANT = '_expression_balanced_var_subsample_1000'
 LAYERS = [f'resnet_layer{x+1}' for x in range(4)] + ['resnet_output', 'ReconNetWrapper_output']
 LAYERS = LAYERS[1:]
 LAYERS = ['resnet_layer1']
+LAYERS = ['ReconNetWrapper_output_identity_expression']
 
 # DATASET = 'resnet_image_embedding'
 # VARIANT = '_expression_balanced_var_subsample_1000'
@@ -72,13 +73,27 @@ if __name__ == '__main__':
     print(f'{LAYERS[li]} ({li+1} of {len(LAYERS)})')
     
     layer = LAYERS[li]
-    acts = f'{DATASET}/{MODE}{VARIANT}/{layer}'
+
+    src_ln = layer
+    dst_ln = layer
+
+    act_mask = None
+    if dst_ln == 'ReconNetWrapper_output_identity_expression':
+      src_ln = 'ReconNetWrapper_output'
+      act_mask = np.arange(0, 80 + 64)  # alpha (R^80) = identity, beta (R^64) = expression
+
+    src_acts = f'{DATASET}/{MODE}{VARIANT}/{src_ln}'
+    dst_acts = f'{DATASET}/{MODE}{VARIANT}/{dst_ln}'
+
     pca_p = f'pca_nc_{CUSTOM_NUM_COMPONENTS}' if CUSTOM_NUM_COMPONENTS is not None else 'pca'
     cp_dir = f'{pca_p}_checkpoints' if MODE == 'train' else f'{pca_p}_eval'
-    dst_p = os.path.join(data_root, cp_dir, acts)
+    dst_p = os.path.join(data_root, cp_dir, dst_acts)
 
-    act, split, _, _ = utility.load_activations(os.path.join(data_root, 'activations', f'{acts}.h5'))
+    act, split, _, _ = utility.load_activations(os.path.join(data_root, 'activations', f'{src_acts}.h5'))
     act = act[split == SELECT_SPLIT, :]
+
+    if act_mask is not None:
+      act = act[:, act_mask]
 
     if MODE == 'train':
       hp = train_hp(act)
@@ -102,7 +117,7 @@ if __name__ == '__main__':
     
     else:
       cp_dir_name = f'{pca_p}_checkpoints'
-      src_p = os.path.join(data_root, cp_dir_name, acts.replace('valid', 'train'))
+      src_p = os.path.join(data_root, cp_dir_name, dst_acts.replace('valid', 'train'))
       model, hp = load_checkpoint(src_p)
       err = recon_err(model, act, hp['num_components'])
       ev = explained_var(model, act, hp['num_components'])

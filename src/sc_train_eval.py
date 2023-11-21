@@ -3,20 +3,26 @@ import utility
 import numpy as np
 import scipy.io
 import os
+from sklearn.decomposition import PCA
 
 data_root = utility.get_dataroot()
 
-MODE = 'valid'
-SELECT_SPLIT = 'valid'
-SAVE = False
+N_PCS = None
+SEPARATE_TRAIN_VALID_PCA = False
+
+MODE = 'train'
+SELECT_SPLIT = 'train'
+SAVE = True
 
 DATASET = 'd3dfr'
 VARIANT = '_var_subsample_2048'
 VARIANT = '_expression_balanced_var_subsample_1000'
 # VARIANT = ''
-LAYERS = [f'resnet_layer{x+1}' for x in range(4)] + ['resnet_output', 'ReconNetWrapper_output']
-LAYERS = LAYERS[1:]
-LAYERS = ['resnet_layer1']
+# LAYERS = [f'resnet_layer{x+1}' for x in range(4)] + ['resnet_output', 'ReconNetWrapper_output']
+# LAYERS = [f'resnet_layer{x+1}' for x in range(4)]
+LAYERS = [f'ReconNetWrapper_output_identity_expression']
+# LAYERS = LAYERS[1:]
+# LAYERS = ['resnet_layer1']
 
 # DATASET = 'resnet_image_embedding'
 # VARIANT = '_expression_balanced_var_subsample_1000'
@@ -46,7 +52,7 @@ def load_checkpoint(src_p: str) -> sparse_coding_model.OlshausenFieldModel:
   model.load_dict(mat['state_dict'])
   return model, mat['hp']
 
-def save_checkpoint(save_p, model, hp, error, batch_error, prediction=None):
+def save_checkpoint(save_p, model, hp, error, batch_error, prediction=None, pca_model=None):
   os.makedirs(save_p, exist_ok=True)
   sd = {
     'state_dict': model.to_dict(),
@@ -58,8 +64,10 @@ def save_checkpoint(save_p, model, hp, error, batch_error, prediction=None):
     sd['prediction'] = prediction
   scipy.io.savemat(os.path.join(save_p, 'cp.mat'), sd)
   np.save(os.path.join(save_p, 'cp.npy'), sd)
+  if pca_model is not None:
+    utility.save_pca_checkpoint(os.path.join(save_p, 'cp.pkl'), pca_model)
 
-def train_hp(act, layer):
+def train_hp(act, pca_model):
   """
   see compute_pairwise_spc_distance_pca
   """
@@ -67,7 +75,10 @@ def train_hp(act, layer):
   # lr = 1e-3 # @NOTE: this is lower than Qi's, which was 1e-2
   hp = {}
   hp['codeword_dim'] = act.shape[1]
-  hp['num_codewords'] = hp['num_units'] = 500
+  if pca_model is None:
+    hp['num_codewords'] = hp['num_units'] = 500
+  else:
+    hp['num_codewords'] = hp['num_units'] = pca_model.n_components // 2
   # hp['batch_size'] = 250
   hp['batch_size'] = 64 # @NOTE: this is lower than Qi's, which was 250
   hp['lr_r'] = lr
@@ -85,12 +96,38 @@ def train_hp(act, layer):
   
 if __name__ == '__main__':
   for layer in LAYERS:
-    acts = f'{DATASET}/{MODE}{VARIANT}/{layer}'
-    cp_dir = 'sc_checkpoints' if MODE == 'train' else 'sc_eval'
-    dst_p = os.path.join(data_root, cp_dir, acts)
+    src_ln = layer
+    dst_ln = layer
 
-    act, split, _, _ = utility.load_activations(os.path.join(data_root, 'activations', f'{acts}.h5'))
+    act_mask = None
+    if dst_ln == 'ReconNetWrapper_output_identity_expression':
+      src_ln = 'ReconNetWrapper_output'
+      act_mask = np.arange(0, 80 + 64)  # alpha (R^80) = identity, beta (R^64) = expression
+
+    src_acts = f'{DATASET}/{MODE}{VARIANT}/{src_ln}'
+    dst_acts = f'{DATASET}/{MODE}{VARIANT}/{dst_ln}'
+
+    sc_dir = 'sc' if N_PCS is None else f'sc_n_pc_{N_PCS}'
+    train_cp_dir = f'{sc_dir}_checkpoints'
+    cp_dir = train_cp_dir if MODE == 'train' else f'{sc_dir}_eval'
+
+    src_p = os.path.join(data_root, train_cp_dir, dst_acts.replace('valid', 'train')) # load train checkpoint
+    dst_p = os.path.join(data_root, cp_dir, dst_acts)
+
+    act, split, _, _ = utility.load_activations(os.path.join(data_root, 'activations', f'{src_acts}.h5'))
     act = act[split == SELECT_SPLIT, :]
+
+    if act_mask is not None:
+      act = act[:, act_mask]
+
+    pca_model = None
+    if N_PCS is not None:
+      if MODE == 'train' or SEPARATE_TRAIN_VALID_PCA:
+        pca_model = PCA(n_components=N_PCS)
+        act = pca_model.fit_transform(act)
+      else:
+        pca_model, _ = utility.load_pca_checkpoint(os.path.join(src_p, 'cp.pkl'))
+        act = pca_model.transform(act)
 
     if RESCALE_MEAN_ACTIVATIONS_TO is not None:
       mult = RESCALE_MEAN_ACTIVATIONS_TO / np.mean(np.abs(act))
@@ -99,7 +136,8 @@ if __name__ == '__main__':
     print(f'Layer: {layer}; mean abs activations: {np.mean(np.abs(act))}')
 
     if MODE == 'train':
-      hp = train_hp(act, layer)
+      hp = train_hp(act, pca_model)
+      print('HPs: ', hp)
       model = make_model_from_hp(hp)
 
       error_train, batch_error_train = sparse_coding_model.train(
@@ -107,10 +145,9 @@ if __name__ == '__main__':
         verbose=hp['verbose'])
 
       if SAVE:    
-        save_checkpoint(dst_p, model, hp, error_train, batch_error_train)
+        save_checkpoint(dst_p, model, hp, error_train, batch_error_train, pca_model=pca_model)
     
     else:
-      src_p = os.path.join(data_root, 'sc_checkpoints', acts.replace('valid', 'train')) # load train checkpoint
       model, hp = load_checkpoint(src_p)
 
       error_valid, batch_error_valid, valid_pred = sparse_coding_model.evaluate(

@@ -8,7 +8,8 @@ im_ps = fullfile( string(data_root), "goldenberg_faces/images" ...
 ims = arrayfun( @(x) double(imread(x))/255, im_ps, 'un', 0 );
 im_vecs = cate1( cellfun(@(x) x(:)', ims, 'un', 0) );
 
-n_pcs = 80;
+for n_pcs = [7, 80]
+  
 [coeff, score] = pca( im_vecs, 'NumComponents', n_pcs );
 recon = (coeff * score')' + mean( im_vecs, 1 );
 recon_ims = arrayfun( @(i) reshape(recon(i, :), size(ims{i})), 1:size(recon, 1), 'un', 0 );
@@ -21,6 +22,7 @@ metrics.(sprintf('image_recon_error_pca_n_pc_%d', n_pcs)) = recon_errs(lb);
 % 
 % imi = 32;
 % subplot( 1, 2, 1 ); imshow( ims{imi} ); subplot( 1, 2, 2 ); imshow( recon_ims{imi} );
+end
 
 
 %%  training trajectory
@@ -236,6 +238,7 @@ seq_err_tbls = table();
 for i = 1:numel(err_var_names)
   fprintf( '\n %d of %d', i, numel(err_var_names) );
   mask = rowmask( metrics );
+%   mask = metrics.model == 'sc_n_pc_40_eval';
   is_image_metric = false;
   if ( contains(err_var_names{i}, 'image_recon') )
     % only one "layer" / "model" per image
@@ -286,9 +289,42 @@ if ( 0 )
 end
 
 [I, C] = findeach( err_tbl, {'model', 'layer', 'src_model', 'error_metric', 'valence'} );
-[C.r, C.p] = cellfun( ...
-  @(x) corr(err_tbl.(model_var)(x) ...
-  , err_tbl.(behav_var)(x), 'type', 'Spearman'), I );
+
+if ( 0 )  
+  % residualize distinctiveness
+  rs = nan( numel(I), 1 );
+  ps = nan( size(rs) );
+  
+  distinct_rs = nan( size(rs) );
+  distinct_ps = nan( size(rs) );
+  
+  parfor i = 1:numel(I)
+    fprintf( '\n %d of %d', i, numel(I) );
+    search = C(i, :);
+    search.error_metric = 'distinctiveness';
+    xi = I{i};
+    zi = find( ismember(err_tbl(:, C.Properties.VariableNames), search) );
+    if ( numel(zi) == numel(xi) )
+      % risidualize-out distinctiveness
+      [rs(i), ps(i)] = partialcorr( ...
+          err_tbl.(model_var)(xi) ...
+        , err_tbl.(behav_var)(xi), err_tbl.(model_var)(zi) );
+      
+      % compute correlation with distinctiveness
+      [distinct_rs(i), distinct_ps(i)] = corr( ....
+        err_tbl.(behav_var)(xi), err_tbl.(model_var)(zi), 'type', 'Spearman' );
+    end
+  end
+  
+  C.r = rs;
+  C.p = ps;
+  
+  [C.distinct_r, C.distinct_p] = deal( distinct_rs, distinct_ps );
+else
+  [C.r, C.p] = cellfun( ...
+    @(x) corr(err_tbl.(model_var)(x) ...
+    , err_tbl.(behav_var)(x), 'type', 'Spearman'), I );
+end
 
 C = relabel_image_reconstruction_error_metrics( C );
 
@@ -299,24 +335,27 @@ del_di = setdiff( distincti, keep_di );
 C(del_di, :) = [];
 C.error_metric(C.error_metric == 'error') = 'recon_error';
 
-match_lims = true;
-fixed_lims = [-0.2, 0.2];
-% fixed_lims = [];
+%%  plot corr estimates trial by trial
 
 mask = ...
   (C.model == model_name | C.model == 'image');
 mask = mask & (...
   C.error_metric ~= 'distinctiveness' | (...
   C.error_metric == 'distinctiveness' & (...
-    C.src_model == 'd3dfr' | C.src_model == 'resnet_image_embedding')))
+    C.src_model == 'd3dfr' | C.src_model == 'arcface_recog' | C.src_model == 'resnet_image_embedding')))
 % mask = mask & (...
 %   C.error_metric ~= 'image_recon_error' | (...
 %   C.error_metric == 'image_recon_error' & contains(C.layer, 'image_recon_error_pca_')));
 
 % mask = mask & C.error_metric ~= 'distinctiveness';
 % mask = mask & C.error_metric ~= 'error';
+mask = mask & C.error_metric ~= 'image_recon_error';
 
-mask = mask & C.layer ~= "ReconNetWrapper_output";
+mask = mask & ~contains(C.layer, "ReconNetWrapper_output");
+
+match_lims = true;
+fixed_lims = [-0.2, 0.2];
+% fixed_lims = [];
 
 if ( 1 )
   [pcats, xcats, gcats] = deal(...
@@ -381,6 +420,12 @@ else
     end
   end
 end
+
+%%
+
+d_sig = C.distinct_p < 0.05 & mask & C.error_metric ~= 'distinctiveness';
+C(d_sig, :)
+
 %%  scatter corr estimates trial by trial
 
 do_save = false;
@@ -452,9 +497,9 @@ ylabel( axs(1), sprintf('%s of (face number vs. estimate diff)', var_name) );
 
 seq_err_tbl = relabel_image_reconstruction_error_metrics( seq_err_tbls );
 
-err_var_name = 'distinctiveness';
-% err_var_name = 'error';
-err_var_name = 'image_recon_error';
+% err_var_name = 'distinctiveness';
+err_var_name = 'error';
+% err_var_name = 'image_recon_error';
 seq_err_tbl = seq_err_tbl(seq_err_tbl.error_metric == err_var_name, :);
 
 do_save = false;
@@ -463,8 +508,9 @@ do_z_post = true;
 match_lims = true;
 zero_centered_lims = true;
 per_valence = true;
-model_name = 'pca_nc_80_eval';
-% model_name = 'sc_eval';
+% model_name = 'pca_nc_80_eval';
+% model_name = 'sc_n_pc_40_eval';
+model_name = 'sc_eval';
 fixed_lims = [-0.8, 0.6];
 dup_behav = false;
 
@@ -515,12 +561,18 @@ end
 %   (seq_err_tbl.layer == 'behavior');
 
 if ( ~dup_behav )
+%   mask = mask & (...
+%     (seq_err_tbl.src_model == 'd3dfr' & (...
+%     seq_err_tbl.layer == 'ReconNetWrapper_output_identity_expression' | ...
+%     seq_err_tbl.layer == 'ReconNetWrapper_output')) | ...
+%     (seq_err_tbl.layer == 'behavior'));  
+  
   mask = mask & (...
     (seq_err_tbl.src_model == 'd3dfr' & seq_err_tbl.layer == 'resnet_layer2') | ...
     (seq_err_tbl.src_model == 'arcface_recog' & seq_err_tbl.layer == 'resnet_layer2') | ...
     (seq_err_tbl.src_model == 'resnet_image_embedding' & seq_err_tbl.layer == 'resnet_layer4') | ...
-    (contains(seq_err_tbl.src_model, 'image')) | ...
-    (seq_err_tbl.layer == 'behavior'));  
+    (seq_err_tbl.layer == 'behavior'));
+%     (contains(seq_err_tbl.src_model, 'image'));
 end
 
 if ( 0 )  % for distinctiveness
@@ -931,7 +983,7 @@ src_model_names = ["resnet_image_embedding", "arcface_recog", "d3dfr"];
 layer_name_sets = {
   compose("layer%d", 1:4) ... % resnet_image_embedding
   compose("layer%d", 1:4) ... % arcface_recog
-  , [compose("resnet_layer%d", 1:4), "ReconNetWrapper_output"] ... % d3dfr
+  , [compose("resnet_layer%d", 1:4), "ReconNetWrapper_output", "ReconNetWrapper_output_identity_expression"] ... % d3dfr
 };
 
 variants = repmat( ...
@@ -945,6 +997,7 @@ variants = repmat( ...
 % ds_name = "d3dfr/valid";
 % layer_names = ["ReconNetWrapper_output", "resnet_output"];
 
+% eval_dir_names = ["sc_n_pc_40_eval", "sc_eval", "pca_nc_80_eval"];
 eval_dir_names = ["sc_eval", "pca_nc_80_eval"];
 
 all_metrics = table();
@@ -957,9 +1010,26 @@ for idx = 1:numel(src_model_names)
   
   for i = 1:numel(eval_dir_names)
 
-    eval_dirs = fullfile( data_root, eval_dir_names(i), ds_name, layer_names );
-    act_files = fullfile( data_root, "activations", ds_name, compose("%s.h5", layer_names) );
-    distinct_files = fullfile( data_root, "distinctiveness", ds_name, compose("%s.mat", layer_names) );
+    lns = layer_names;
+    
+    eval_dirs = fullfile( data_root, eval_dir_names(i), ds_name, lns );
+    miss_layers = arrayfun( @(x) exist(x, 'dir') == 0, eval_dirs );
+    eval_dirs(miss_layers) = [];
+    lns(miss_layers) = [];
+    
+    if ( isempty(eval_dirs) ), continue; end
+    
+    % load activations from source layer
+    act_lns = lns;
+    [~, lb] = ismember( 'ReconNetWrapper_output_identity_expression', lns );
+    for j = 1:numel(lb)
+      if ( lb(j) > 0 )
+        act_lns(lb(j)) = 'ReconNetWrapper_output';
+      end
+    end
+    
+    act_files = fullfile( data_root, "activations", ds_name, compose("%s.h5", act_lns) );
+    distinct_files = fullfile( data_root, "distinctiveness", ds_name, compose("%s.mat", lns) );
 
     eval_cps = arrayfun( @load, fullfile(eval_dirs, "cp.mat"), 'un', 0 );
     eval_errs = cate1( cellfun(@(x) x.error(:), eval_cps, 'un', 0) );
@@ -967,7 +1037,7 @@ for idx = 1:numel(src_model_names)
     to_str = @(x) columnize(deblank(string(x)));
     idents = cate1(arrayfun(@(x) to_str(h5read(char(x), '/identifiers')), act_files, 'un', 0));
     layers = arrayfun( @(x) to_str(h5read(char(x), '/layers')), act_files, 'un', 0 );
-    layers = cate1( arrayfun(@(i) repmat(layer_names(i), size(layers{i})), 1:numel(layers), 'un', 0) );
+    layers = cate1( arrayfun(@(i) repmat(lns(i), size(layers{i})), 1:numel(layers), 'un', 0) );
     src_model = repmat( src_model_name, numel(eval_errs), 1 );
 
     distincts = cate1( cellfun(@shared_utils.io.fload, distinct_files, 'un', 0) );

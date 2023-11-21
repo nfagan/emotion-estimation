@@ -2,6 +2,8 @@ import numpy as np
 import h5py
 import scipy.io
 from typing import List, Union, Tuple
+from sklearn.decomposition import PCA
+import joblib
 
 def get_dataroot():
   return 'D:\\data\\changlab\\ilker_collab'
@@ -87,3 +89,12 @@ def h5_write_activations(
   f.create_dataset('splits', (len(splits), 1), 'S10', data=splits)
   f.create_dataset('layers', (len(layers), 1), 'S10', data=layers)
   f.create_dataset('identifiers', (len(identifiers), 1), 'S10', data=identifiers)
+
+def load_pca_checkpoint(src_p: str) -> PCA:
+  mat = joblib.load(src_p)
+  model = mat['model']
+  return model, mat['hp'] if 'hp' in mat else None
+
+def save_pca_checkpoint(save_p: str, model: PCA):
+  sd = {'model': model}
+  joblib.dump(sd, save_p)

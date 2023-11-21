@@ -5,11 +5,20 @@ fs = fs(contains(fs, 'valid_expression_balanced_var_subsample_1000'));
 
 dst_p = fullfile( data_root, 'distinctiveness' );
 
+use_custom = true;
+custom_mask = 1:144;  % (R^80) = identity + beta (R^64) = expression
+custom_dst_layer = 'ReconNetWrapper_output_identity_expression';
+
 for i = 1:numel(fs)
   fprintf( '\n %d of %d', i, numel(fs) );
   
   full_dst_p = fullfile( dst_p, strrep(fs{i}, fullfile(data_root, 'activations'), '') );
   full_dst_p = strrep( full_dst_p, '.h5', '.mat' );
+  
+  if ( use_custom )
+    [p, name] = fileparts( full_dst_p );
+    full_dst_p = fullfile( p, sprintf('%s.mat', custom_dst_layer) );
+  end
   
   if ( exist(full_dst_p, 'file') )
     fprintf( '\n Skipping: %s', full_dst_p );
@@ -29,7 +38,7 @@ for i = 1:numel(fs)
   parfor j = 1:act_size(2)
 %     fprintf( '\n %d of %d', j, act_size(2) );
     act = read_act( valid_f, j );
-    ds = act_dist( act, valid_f );
+    ds = act_dist( act, valid_f, custom_mask );
     valid_ds(j) = min( ds(ds > 0) );
   end
   
@@ -37,7 +46,7 @@ for i = 1:numel(fs)
   parfor j = 1:act_size(2)
 %     fprintf( '\n %d of %d', j, act_size(2) );
     act = read_act( valid_f, j );
-    ds = act_dist( act, train_f );
+    ds = act_dist( act, train_f, custom_mask );
     train_ds(j) = min( ds(ds > 0) );
   end
   
@@ -57,7 +66,11 @@ act = h5read( f, an, [1, j], [inf, n] )';
 
 end
 
-function ds = act_dist(act, src)
+function ds = act_dist(act, src, mask)
+
+if ( ~isempty(mask) )
+  act = act(:, mask);
+end
 
 an = '/activations';
 act_info = h5info( src, an );
@@ -72,6 +85,9 @@ for c = 1:num_chunks
   i1 = min( i0 + chunk_size, act_size(2) );
   n = i1 - i0;
   acts = read_act( src, i0+1, n );
+  if ( ~isempty(mask) )
+    acts = acts(:, mask);
+  end
   chunk_ds = vecnorm( act - acts, 2, 2 );
   ds(i0+1:i0+n) = chunk_ds;
 end

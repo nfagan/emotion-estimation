@@ -113,7 +113,7 @@ hist( true_mean_ratings, 1000 );
 
 %%  fig 1c
 
-do_save = false;
+do_save = true;
 % prctile_mean_rating = 50;
 prctile_mean_rating = [];
 is_lt = false;
@@ -153,7 +153,7 @@ ord = plots.orderby( L, 'positive', ord );
 [I, id, L] = rowref_many( ord, I, id, L );
 
 figure(2); clf;
-axs = plots.simplest_barsets( plt, I, id, L ...
+[axs, hs] = plots.simplest_barsets( plt, I, id, L ...
   , 'error_func', @plotlabeled.nansem ...
   , 'as_line_plot', true ...
 );
@@ -161,11 +161,27 @@ ylabel( axs(1), 'Estimated emotion rating - actual emotion' );
 title( axs(1), 'Human subject behavior' );
 xlabel( axs(1), 'Face number' );
 
+for i = 1:numel(hs)
+  set( hs{i}, 'linewidth', 2 );
+end
+
 if ( isempty(prctile_mean_rating) )
   ylim( axs(1), [-6, 6] );
 else
   ylim( axs(1), [-24, 24] );
 end
+
+if ( 1 )
+  assert( isnumeric(mask) );
+  mask = intersect( mask, find(strcmp(C.valence, 'negative')) );
+  mean_est = mean( plt(mask) );  
+  hold( axs, 'on' );
+  h1 = shared_utils.plot.add_horizontal_lines( axs, 0 );
+  h2 = shared_utils.plot.add_horizontal_lines( axs, mean_est );
+end
+
+set( gcf, 'Renderer', 'painters' );
+style_line_plots( axs );
 
 if ( do_save )
   save_p = fullfile( fileparts(data_root), 'plots', dsp3.datedir, 'behavior' );
@@ -175,7 +191,8 @@ if ( do_save )
     fname = sprintf( '%s_%s_%d_prctile', fname, lt_str, prctile_mean_rating );
   end
   shared_utils.io.require_dir( save_p );
-  shared_utils.plot.save_fig( gcf, fullfile(save_p, fname), {'png', 'fig'}, false );
+  shared_utils.plot.save_fig( gcf, fullfile(save_p, fname), {'png', 'fig', 'epsc'}, false );
+  exportgraphics( gcf, fullfile(save_p, sprintf('%s.eps', fname)), 'ContentType', 'vector' );
 end
 
 %%  slopes and means as f(prctile)

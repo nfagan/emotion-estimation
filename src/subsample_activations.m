@@ -5,11 +5,11 @@ data_root = 'D:\data\changlab\ilker_collab';
 % fs = shared_utils.io.find( fullfile(data_root, 'activations/d3dfr', ["train_expression_balanced"]), '.h5' );
 % src_p = fullfile( data_root, 'activations/d3dfr/train_var_subsample' );
 
-fs = shared_utils.io.find( fullfile(data_root, 'activations/arcface_recog' ...
-  , ["train_expression_balanced", "valid_expression_balanced"]), '.h5' );
+fs = shared_utils.io.find( fullfile(data_root, 'activations/resnet_image_embedding' ...
+  , ["train_expression_balanced", "valid_expression_balanced_phase_scrambled"]), '.h5' );
 src_p = [];
 
-if ( 1 )
+if ( 0 )
   fs = fs(contains(fs, 'layer1'));
 end
 
@@ -50,6 +50,7 @@ for i = 1:numel(fs)
     fprintf( '\n Using cached index for "%s"', dst_p );
     index_p = fullfile( strrep(fileparts(dst_p), 'valid', 'train') ...
       , sprintf('%s_index.mat', shared_utils.io.filenames(dst_p)) );
+    index_p = strrep( index_p, '_phase_scrambled', '' );
     select_idx = shared_utils.io.fload( index_p );
   elseif ( ~isempty(src_p) )
     index_p = fullfile( src_p, sprintf('%s_index.mat', shared_utils.io.filenames(dst_p)) );

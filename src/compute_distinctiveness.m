@@ -1,11 +1,11 @@
 data_root = 'D:\data\changlab\ilker_collab';
 
-fs = shared_utils.io.find( fullfile(data_root, 'activations/d3dfr'), '.h5', true );
-fs = fs(contains(fs, 'valid_expression_balanced_var_subsample_1000'));
+fs = shared_utils.io.find( fullfile(data_root, 'activations/resnet_image_embedding'), '.h5', true );
+fs = fs(contains(fs, 'valid_expression_balanced_phase_scrambled_var_subsample_1000'));
 
 dst_p = fullfile( data_root, 'distinctiveness' );
 
-use_custom = true;
+use_custom = false;
 custom_mask = 1:144;  % (R^80) = identity + beta (R^64) = expression
 custom_dst_layer = 'ReconNetWrapper_output_identity_expression';
 
@@ -31,6 +31,8 @@ for i = 1:numel(fs)
   act_size = act_info.Dataspace.Size;
   
   train_f = strrep( fs{i}, 'valid', 'train' );
+  train_f = strrep( train_f, '_phase_scrambled', '' );
+  
   train_info = h5info( train_f, an );
   train_size = train_info.Dataspace.Size;
   
